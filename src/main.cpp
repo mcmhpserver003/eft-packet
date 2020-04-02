@@ -11,6 +11,7 @@
 #include "glm/gtc/matrix_transform.hpp"
 #include "glm/gtx/norm.hpp"
 #include "glm/gtc/type_ptr.hpp"
+#include "glm/gtx/string_cast.hpp"
 
 #include "SDL/SDL.h"
 #include "SDL/SDL_opengl.h"
@@ -33,6 +34,7 @@
 #include <iostream>
 #include <vector>
 #include <algorithm>
+
 
 
 
@@ -93,7 +95,7 @@ void KeyController(SDL_KeyboardEvent* key);
 glm::vec3 getStrafeVectorRight(glm::vec3 vec);
 glm::vec3 freecam_at;
 glm::vec3 player_forward_vec;
-float speed = 1.0f;
+float movment_sensitivity = 1.0f;
 bool freecam = false;
 float player_pos_x;
 float player_pos_y;
@@ -489,7 +491,7 @@ void do_net(std::vector<Packet> work, const char* packet_dump_path)
 void do_update()
 {
 }
-
+bool testing = true;
 void do_render(GraphicsState* gfx)
 {
     // ye who read this code, judge its performance (and lack of state caching) not
@@ -523,7 +525,9 @@ void do_render(GraphicsState* gfx)
         glDrawArrays(GL_TRIANGLES, 0, 36);
     };
 
+    if (testing) {
 
+    }else{
 
     if (tk::g_state && tk::g_state->map)
     {
@@ -550,6 +554,7 @@ void do_render(GraphicsState* gfx)
             }
             return 255;
         };
+
 
         tk::g_state->map->lock();
 
@@ -586,17 +591,17 @@ void do_render(GraphicsState* gfx)
                 break;
             case 1:
                 view = glm::lookAt(freecam_at, freecam_look, { 0.0f, 1.0f, 0.0f });
+                std::cout << "view: " << glm::to_string(view) << "\n";
+                std::cout << "cam_at: " << glm::to_string(freecam_at) << "\n";
+                std::cout << "freecam_look: " << glm::to_string(freecam_look) << "\n";
                 break;
             case 2:
-                view = glm::lookAt(topdown_cam_at, topdown_cam_look, { 0.0f, 1.0f, 0.0f });
-                topdown_freecam_pos_x = player_pos_x;
-                topdown_freecam_pos_z = player_pos_z;
-                std::cout << "vector x: " << player_forward_vec.x << "\n";
-                std::cout << "vector y: " << player_forward_vec.y << "\n";
-                std::cout << "vector z: " << player_forward_vec.z << "\n";
+                view = glm::mat4(-1.0f,0.0f,-0.0f,0.0f,0.0f,0.0f,1.0f,0.0f,0.0f,1.0f,-0.0f,0.0f,player_pos_x,-player_pos_z,-topdown_cam_height,1.0f);
+                freecam_pos_x = player_pos_x;
+                freecam_pos_z = player_pos_z;
                 break;
             case 3:
-
+                view = glm::mat4(-1.0f, 0.0f, -0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, -0.0f, 0.0f, freecam_pos_x, -freecam_pos_z, -topdown_cam_height, 1.0f);
                 break;
 
             default:
@@ -721,10 +726,10 @@ void do_render(GraphicsState* gfx)
                     glm::vec3 at(obs->pos.x, obs->pos.y, obs->pos.z);
                     glm::vec3 enemy_forward_vec = get_forward_vec(obs->rot.y, obs->rot.x, at);
                     bool facing_towards_player = glm::dot(player_forward_vec, enemy_forward_vec) < -0.0f;
-                    if (!background_Transparent) {
-                        int alpha = facing_towards_player ? 255 : 63;
-                    }
                     int alpha = 255;
+                    if (!background_Transparent) {
+                        alpha = facing_towards_player ? 255 : 63;
+                    }
                     glm::vec3 look = at + (enemy_forward_vec * (facing_towards_player ? 75.0f : 12.5f));
                     draw_line(at.x, at.y, at.z, look.x, look.y, look.z, r, g, b, alpha);
                 }
@@ -788,6 +793,7 @@ void do_render(GraphicsState* gfx)
 
         tk::g_state->map->unlock();
     }
+    }
 
     SDL_GL_SwapWindow(gfx->window);
     SDL_Delay(33);
@@ -818,10 +824,7 @@ GraphicsState make_gfx(SDL_GLContext ctx, SDL_Window* window)
 
         return handle;
     };
-
-
-
-    if (!background_Transparent) {
+  
     GLuint vtx_shader = make_shader(GL_VERTEX_SHADER,
         R"(
             #version 330 core
@@ -851,9 +854,7 @@ GraphicsState make_gfx(SDL_GLContext ctx, SDL_Window* window)
                 }
             }
         )"
-        );
-    glAttachShader(gfx.shader, vtx_shader);
-}
+    );  
 
     GLuint pixel_shader = make_shader(GL_FRAGMENT_SHADER,
         R"(
@@ -871,7 +872,7 @@ GraphicsState make_gfx(SDL_GLContext ctx, SDL_Window* window)
         )"
     );
 
-    
+    glAttachShader(gfx.shader, vtx_shader);
     glAttachShader(gfx.shader, pixel_shader);
     glLinkProgram(gfx.shader);
 
@@ -1109,32 +1110,34 @@ void KeyController(SDL_KeyboardEvent* key) {
             //change camera height
         case SDLK_SPACE:
             if (view_mode > 1) {
-                topdown_cam_height += speed;
-                if (topdown_cam_height > 500.0f) {
-                    topdown_cam_height = 500.0f;
+                topdown_cam_height += movment_sensitivity;
+                if (topdown_cam_height > 1000.0f) {
+                    topdown_cam_height = 1000.0f;
                 }
+                std::cout << "2d cam new height: " << topdown_cam_height << "\n";
             }
             else {
-                freecam_pos_y += speed;
+                freecam_pos_y += movment_sensitivity;
                 std::cout << "3d freecam new height: " << freecam_pos_y << "\n";
             }
             
             break;
         case SDLK_LSHIFT:
             if (view_mode > 1) {
-                topdown_cam_height -= speed;
-                if (topdown_cam_height < 10.0f) {
-                    topdown_cam_height = 10.0f;
+                topdown_cam_height -= movment_sensitivity;
+                if (topdown_cam_height < 5.0f) {
+                    topdown_cam_height = 5.0f;
                 }
+                std::cout << "2d cam new height: " << topdown_cam_height << "\n";
             }
             else {
-                freecam_pos_y -= speed;
+                freecam_pos_y -= movment_sensitivity;
                 std::cout << "3d freecam new height: " << freecam_pos_y << "\n";
             }
             break;
         case SDLK_w:
             if (view_mode > 1) {
-                
+                freecam_pos_z += movment_sensitivity;
             }
             else {
                 freecam_pos_x += player_forward_vec.x;
@@ -1147,7 +1150,7 @@ void KeyController(SDL_KeyboardEvent* key) {
             break;
         case SDLK_s:
             if (view_mode > 1) {
-
+                freecam_pos_z -= movment_sensitivity;
             }
             else {
                 freecam_pos_x -= player_forward_vec.x;
@@ -1160,7 +1163,7 @@ void KeyController(SDL_KeyboardEvent* key) {
             break;
         case SDLK_d:
             if (view_mode > 1) {
-
+                freecam_pos_x += movment_sensitivity;
             }
             else {
                 freecam_pos_x += getStrafeVectorRight(player_forward_vec).x;
@@ -1169,7 +1172,7 @@ void KeyController(SDL_KeyboardEvent* key) {
             break;
         case SDLK_a:
             if (view_mode > 1) {
-
+                freecam_pos_x -= movment_sensitivity;
             }
             else {
                 freecam_pos_x -= getStrafeVectorRight(player_forward_vec).x;
