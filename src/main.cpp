@@ -819,6 +819,9 @@ GraphicsState make_gfx(SDL_GLContext ctx, SDL_Window* window)
         return handle;
     };
 
+
+
+    if (!background_Transparent) {
     GLuint vtx_shader = make_shader(GL_VERTEX_SHADER,
         R"(
             #version 330 core
@@ -848,7 +851,9 @@ GraphicsState make_gfx(SDL_GLContext ctx, SDL_Window* window)
                 }
             }
         )"
-    );
+        );
+    glAttachShader(gfx.shader, vtx_shader);
+}
 
     GLuint pixel_shader = make_shader(GL_FRAGMENT_SHADER,
         R"(
@@ -866,7 +871,7 @@ GraphicsState make_gfx(SDL_GLContext ctx, SDL_Window* window)
         )"
     );
 
-    glAttachShader(gfx.shader, vtx_shader);
+    
     glAttachShader(gfx.shader, pixel_shader);
     glLinkProgram(gfx.shader);
 
