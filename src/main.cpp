@@ -92,7 +92,7 @@ void printviewmode(int vm);
 void KeyController(SDL_KeyboardEvent* key);
 glm::vec3 getStrafeVectorRight(glm::vec3 vec);
 glm::vec3 freecam_at;
-glm::vec3 freeplayer_forward_vec;
+glm::vec3 player_forward_vec;
 float speed = 1.0f;
 bool freecam = false;
 float player_pos_x;
@@ -554,9 +554,8 @@ void do_render(GraphicsState* gfx)
         tk::g_state->map->lock();
 
         float player_y = 0.0f;
-        glm::vec3 player_forward_vec;
-        glm::vec3 freeplayer_forward_vec;
-        glm::vec3 global_downwards_vector = glm::vec3(0.0f, -1.0f, 0.0f);
+        //glm::vec3 player_forward_vec;
+        glm::vec3 global_downwards_vector = glm::vec3(0.0f, -0.95f, 0.0f);
 
         if (tk::Observer* player = tk::g_state->map->get_player_manual_lock(); player)
         {
@@ -573,11 +572,10 @@ void do_render(GraphicsState* gfx)
             glm::vec3 cam_look = cam_at + player_forward_vec;
             //freecam
             glm::vec3 freecam_at(freecam_pos_x, freecam_pos_y, freecam_pos_z);
-            freeplayer_forward_vec = get_forward_vec(pitch, yaw, freecam_at);
-            glm::vec3 freecam_look = freecam_at + freeplayer_forward_vec;
+            glm::vec3 freecam_look = freecam_at + player_forward_vec;
             //2D / top down fixed 2 player
             glm::vec3 topdown_cam_at(player_pos_x, topdown_cam_height, player_pos_z);
-            glm::vec3 topdown_cam_look = topdown_cam_at + global_downwards_vector;
+            glm::vec3 topdown_cam_look = topdown_cam_at + player_forward_vec;
 
             switch (view_mode) {
             case 0:
@@ -593,6 +591,9 @@ void do_render(GraphicsState* gfx)
                 view = glm::lookAt(topdown_cam_at, topdown_cam_look, { 0.0f, 1.0f, 0.0f });
                 topdown_freecam_pos_x = player_pos_x;
                 topdown_freecam_pos_z = player_pos_z;
+                std::cout << "vector x: " << player_forward_vec.x << "\n";
+                std::cout << "vector y: " << player_forward_vec.y << "\n";
+                std::cout << "vector z: " << player_forward_vec.z << "\n";
                 break;
             case 3:
 
@@ -1131,7 +1132,12 @@ void KeyController(SDL_KeyboardEvent* key) {
                 
             }
             else {
-                freecam_at += freeplayer_forward_vec;
+                freecam_pos_x += player_forward_vec.x;
+                freecam_pos_y += player_forward_vec.y;
+                freecam_pos_z += player_forward_vec.z;
+                std::cout << "3d freecam x " << player_forward_vec.x << "\n";
+                std::cout << "3d freecam y: " << player_forward_vec.y << "\n";
+                std::cout << "3d freecam z: " << player_forward_vec.z << "\n";
             }
             break;
         case SDLK_s:
@@ -1139,7 +1145,12 @@ void KeyController(SDL_KeyboardEvent* key) {
 
             }
             else {
-                freecam_at -= freeplayer_forward_vec;
+                freecam_pos_x -= player_forward_vec.x;
+                freecam_pos_y -= player_forward_vec.y;
+                freecam_pos_z -= player_forward_vec.z;
+                std::cout << "3d freecam x " << player_forward_vec.x << "\n";
+                std::cout << "3d freecam y: " << player_forward_vec.y << "\n";
+                std::cout << "3d freecam z: " << player_forward_vec.z << "\n";
             }
             break;
         case SDLK_d:
@@ -1147,7 +1158,8 @@ void KeyController(SDL_KeyboardEvent* key) {
 
             }
             else {
-                freecam_at += getStrafeVectorRight(freeplayer_forward_vec);
+                freecam_pos_x += getStrafeVectorRight(player_forward_vec).x;
+                freecam_pos_z += getStrafeVectorRight(player_forward_vec).z;
             }
             break;
         case SDLK_a:
@@ -1155,7 +1167,8 @@ void KeyController(SDL_KeyboardEvent* key) {
 
             }
             else {
-                freecam_at -= getStrafeVectorRight(freeplayer_forward_vec);
+                freecam_pos_x -= getStrafeVectorRight(player_forward_vec).x;
+                freecam_pos_z -= getStrafeVectorRight(player_forward_vec).z;
             }
             break;
 
