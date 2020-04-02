@@ -9,10 +9,12 @@
 #include "gl/glu.h"
 #include "glm/glm.hpp"
 #include "glm/gtc/matrix_transform.hpp"
+#include "glm/gtx/norm.hpp"
 #include "glm/gtc/type_ptr.hpp"
 
 #include "SDL/SDL.h"
 #include "SDL/SDL_opengl.h"
+#include "SDL/SDL_syswm.h"
 #include "unet.hpp"
 #include "common.hpp"
 
@@ -27,8 +29,12 @@
 #define GLT_IMPLEMENTATION
 #include "gltext.h"
 
-// vvv FILL THIS IN
-#define DEVICE_IP "fill.me.in.with.your.local.network.adapter.ip"
+
+#include <iostream>
+#include <vector>
+#include <algorithm>
+
+
 
 struct Packet
 {
@@ -69,8 +75,42 @@ void do_render(GraphicsState* state);
 GraphicsState make_gfx(SDL_GLContext ctx, SDL_Window* window);
 void resize_gfx(GraphicsState* state, int width, int height);
 
+//declaring vars and functions used for EFTRadarSettings.ini
+void EFTRadarSettup();
+bool MakeWindowTransparent(SDL_Window* window, COLORREF colorKey);
+std::string DEVICE_IP_RADAR_PC;
+std::string DEVICE_IP_GAME_PC;
+bool background_Transparent;
+bool custom_bg_colour;
+int custom_r;
+int custom_g;
+int custom_b;
+int view_mode;
+void printviewmode(int vm);
+
+//declaring vars for camera controlls
+void KeyController(SDL_KeyboardEvent* key);
+glm::vec3 getStrafeVectorRight(glm::vec3 vec);
+glm::vec3 freecam_at;
+glm::vec3 freeplayer_forward_vec;
+float speed = 1.0f;
+bool freecam = false;
+float player_pos_x;
+float player_pos_y;
+float player_pos_z;
+float freecam_pos_x;
+float freecam_pos_y = 1.5f;
+float freecam_pos_z;
+float topdown_cam_height = 10.0f;
+float topdown_freecam_pos_x;
+float topdown_freecam_pos_z;
+
+
 int main(int argc, char* argv[])
 {
+    //Setup EFTRadar using EFTRadarSettings.ini
+    EFTRadarSettup();
+
     const char* packet_dump_path = argc >= 2 ? argv[1] : nullptr;
     bool dump_packets = argc >= 3 && argv[2][0] == '1';
 
@@ -81,7 +121,6 @@ int main(int argc, char* argv[])
     pcpp::PcapLiveDevice* dev = nullptr;
 
     WorkGroup work;
-
     if (packet_dump_path && !dump_packets)
     {
         // We load packets for offline replay on another thread.
@@ -119,14 +158,25 @@ int main(int argc, char* argv[])
     }
     else
     {
-        dev = pcpp::PcapLiveDeviceList::getInstance().getPcapLiveDeviceByIp(DEVICE_IP);
+        
+        dev = pcpp::PcapLiveDeviceList::getInstance().getPcapLiveDeviceByIp(DEVICE_IP_RADAR_PC.c_str());
+        //open fails with wrong ip
+        if (dev == NULL)
+        {
+            std::cout << "Cannot find interface with IPv4 address of: '" << DEVICE_IP_RADAR_PC.c_str() << "' on Radar PC\n";
+            std::cout << "Press ENTER to exit \n";
+            std::cin.ignore();
+            exit(1);
+        }
         dev->open();
+        
+        
 
         pcpp::ProtoFilter filter(pcpp::UDP);
+
         dev->setFilter(filter);
 
         static std::string s_server_ip;
-
         dev->startCapture(
             [](pcpp::RawPacket* packet, pcpp::PcapLiveDevice* dev, void* user_data)
             {
@@ -151,7 +201,7 @@ int main(int argc, char* argv[])
                 uint8_t* data_start = udp->getDataPtr(udp->getHeaderLen());
 
                 int timestamp = (int)(GetTickCount() - s_base_time);
-                bool outbound = src_ip == DEVICE_IP;
+                bool outbound = src_ip == DEVICE_IP_GAME_PC;
                 std::vector<uint8_t> data;
                 data.resize(len);
                 memcpy(data.data(), data_start, len);
@@ -161,15 +211,20 @@ int main(int argc, char* argv[])
                 work.work.push_back({ timestamp , outbound, std::move(data), std::move(src_ip), std::move(dst_ip) });
             }, &work);
     }
-
     SDL_Init(SDL_INIT_EVERYTHING);
 
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
 
-    SDL_Window* win = SDL_CreateWindow("Bastian Suter's Queef", 100, 100, 1920, 1080, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+
+    
+
+
+    //add for borderless    | SDL_WINDOW_BORDERLESS
+    SDL_Window* win = SDL_CreateWindow("Bastian Suter's Queef", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1920, 1080, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED);
     SDL_GLContext ctx = SDL_GL_CreateContext(win);
+
 
     glewInit();
     SDL_GL_SetSwapInterval(1);
@@ -177,6 +232,7 @@ int main(int argc, char* argv[])
     GraphicsState gfx = make_gfx(ctx, win);
 
     bool quit = false;
+
 
     std::unique_ptr<std::thread> net_thread = std::make_unique<std::thread>(
         [&]()
@@ -204,22 +260,33 @@ int main(int argc, char* argv[])
     while (!quit)
     {
         SDL_Event e;
-        if (SDL_PollEvent(&e))
-        {
-            if (e.type == SDL_QUIT)
-            {
+        while (SDL_PollEvent(&e)) {
+            switch (e.type) {
+
+            case SDL_KEYDOWN:
+            case SDL_KEYUP:
+                    KeyController(&e.key);
+                break;
+
+
+            //window closed
+            case SDL_QUIT: 
                 quit = true;
-            }
-            else if (e.type == SDL_WINDOWEVENT)
-            {
-                if (e.window.event == SDL_WINDOWEVENT_RESIZED)
-                {
-                    resize_gfx(&gfx, e.window.data1, e.window.data2);
-                }
+                break;
+            //default case
+            default:
+                break;
             }
         }
 
+
+
+
         do_update();
+        //only call function if transparent true
+        if(background_Transparent){
+            MakeWindowTransparent(win, RGB(255, 0, 255));
+        }
         do_render(&gfx);
     }
 
@@ -418,6 +485,7 @@ void do_net(std::vector<Packet> work, const char* packet_dump_path)
     }
 }
 
+
 void do_update()
 {
 }
@@ -427,8 +495,35 @@ void do_render(GraphicsState* gfx)
     // ye who read this code, judge its performance (and lack of state caching) not
     std::lock_guard<std::mutex> lock(g_world_lock);
 
-    glClearColor(0.5f, 0.5f, 0.5f, 1.0f);
+    if (background_Transparent) {
+        glClearColor(255, 0, 255, 255);
+    }
+    else if(custom_bg_colour) {
+        glClearColor(custom_r, custom_g, custom_b, 1.0f);
+    }
+    else{
+        glClearColor(0.5f, 0.5f, 0.5f, 1.0f);
+    }
+    
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    auto draw_box = [&gfx]
+    (float x, float y, float z, float scale_x, float scale_y, float scale_z, int r, int g, int b)
+    {
+        glm::mat4 model = glm::mat4(1.0f);
+        glm::vec3 pos(x, y, z);
+        model = glm::translate(model, pos) * glm::scale(model, glm::vec3(scale_x, scale_y, scale_z));
+        glUseProgram(gfx->shader);
+        glUniform1i(glGetUniformLocation(gfx->shader, "line"), 0);
+        glUniform1f(glGetUniformLocation(gfx->shader, "obj_y"), y - (scale_y / 2.0f));
+        glUniform3f(glGetUniformLocation(gfx->shader, "color"), r / 255.0f, g / 255.0f, b / 255.0f);
+        glUniformMatrix4fv(glGetUniformLocation(gfx->shader, "model"), 1, GL_FALSE, &model[0][0]);
+        glBindVertexArray(gfx->vao);
+        glBindBuffer(GL_ARRAY_BUFFER, gfx->vbo);
+        glDrawArrays(GL_TRIANGLES, 0, 36);
+    };
+
+
 
     if (tk::g_state && tk::g_state->map)
     {
@@ -450,23 +545,65 @@ void do_render(GraphicsState* gfx)
 
         auto get_alpha_for_y = [](float y1, float y2)
         {
-            return abs(y1 - y2) >= 3.0f ? 63 : 255;
+            if (!background_Transparent) {
+                return abs(y1 - y2) >= 3.0f ? 63 : 255;
+            }
+            return 255;
         };
 
         tk::g_state->map->lock();
 
         float player_y = 0.0f;
         glm::vec3 player_forward_vec;
+        glm::vec3 freeplayer_forward_vec;
+        glm::vec3 global_downwards_vector = glm::vec3(0.0f, -1.0f, 0.0f);
 
         if (tk::Observer* player = tk::g_state->map->get_player_manual_lock(); player)
         {
+            player_pos_x = player->pos.x;
+            player_pos_y = player->pos.y;
+            player_pos_z = player->pos.z;
             player_y = player->pos.y;
             float pitch = player->rot.y;
             float yaw = player->rot.x;
-            glm::vec3 cam_at(player->pos.x, player->pos.y + 1.5f, player->pos.z);
+
+            //normal playercam
+            glm::vec3 cam_at(player_pos_x, player_pos_y +1.5f, player_pos_z);
             player_forward_vec = get_forward_vec(pitch, yaw, cam_at);
             glm::vec3 cam_look = cam_at + player_forward_vec;
-            view = glm::lookAt(cam_at, cam_look, { 0.0f, 1.0f, 0.0f });
+            //freecam
+            glm::vec3 freecam_at(freecam_pos_x, freecam_pos_y, freecam_pos_z);
+            freeplayer_forward_vec = get_forward_vec(pitch, yaw, freecam_at);
+            glm::vec3 freecam_look = freecam_at + freeplayer_forward_vec;
+            //2D / top down fixed 2 player
+            glm::vec3 topdown_cam_at(player_pos_x, topdown_cam_height, player_pos_z);
+            glm::vec3 topdown_cam_look = topdown_cam_at + global_downwards_vector;
+
+            switch (view_mode) {
+            case 0:
+                view = glm::lookAt(cam_at, cam_look, { 0.0f, 1.0f, 0.0f });
+                freecam_pos_x = player_pos_x;
+                freecam_pos_y = player_pos_y + 1.5f;
+                freecam_pos_z = player_pos_z;
+                break;
+            case 1:
+                view = glm::lookAt(freecam_at, freecam_look, { 0.0f, 1.0f, 0.0f });
+                break;
+            case 2:
+                view = glm::lookAt(topdown_cam_at, topdown_cam_look, { 0.0f, 1.0f, 0.0f });
+                topdown_freecam_pos_x = player_pos_x;
+                topdown_freecam_pos_z = player_pos_z;
+                break;
+            case 3:
+
+                break;
+
+            default:
+                view = glm::lookAt(cam_at, cam_look, { 0.0f, 1.0f, 0.0f });
+                std::cout << "view_mode incorrect number: " << view_mode << "\n";
+                break;
+            }
+            
 
             glUseProgram(gfx->shader);
             glUniform1f(glGetUniformLocation(gfx->shader, "player_y"), player_y);
@@ -480,7 +617,7 @@ void do_render(GraphicsState* gfx)
                 gltSetText(text, txt);
                 gltBeginDraw();
                 gltColor(r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f);
-                gltDrawText3D(text, x - gltGetTextWidth(text, scale) * 0.5f, y, z, scale, (GLfloat*)&view[0][0], (GLfloat*)&proj[0][0]);
+                gltDrawText3D(text, x, y, z, scale, (GLfloat*)&view[0][0], (GLfloat*)&proj[0][0]);
                 gltDeleteText(text);
             };
 
@@ -527,6 +664,7 @@ void do_render(GraphicsState* gfx)
                     glm::vec3 look = at + (get_forward_vec(obs->rot.y, obs->rot.x, at) * 50.0f);
                     look.y += 1.5f;
                     draw_line(at.x, at.y, at.z, look.x, look.y, look.z, 0, 255, 0, 255);
+                    draw_box(at.x, at.y, at.z, 1.0f, 1.0f, 1.0f, 0, 255, 0);
                     continue;
                 }
 
@@ -582,7 +720,10 @@ void do_render(GraphicsState* gfx)
                     glm::vec3 at(obs->pos.x, obs->pos.y, obs->pos.z);
                     glm::vec3 enemy_forward_vec = get_forward_vec(obs->rot.y, obs->rot.x, at);
                     bool facing_towards_player = glm::dot(player_forward_vec, enemy_forward_vec) < -0.0f;
-                    int alpha = facing_towards_player ? 255 : 63;
+                    if (!background_Transparent) {
+                        int alpha = facing_towards_player ? 255 : 63;
+                    }
+                    int alpha = 255;
                     glm::vec3 look = at + (enemy_forward_vec * (facing_towards_player ? 75.0f : 12.5f));
                     draw_line(at.x, at.y, at.z, look.x, look.y, look.z, r, g, b, alpha);
                 }
@@ -806,4 +947,240 @@ void resize_gfx(GraphicsState* state, int width, int height)
     glViewport(0, 0, width, height);
     state->width = width;
     state->height = height;
+}
+
+//definition of EFTRadarSetup()
+void EFTRadarSettup() {
+    const unsigned long puffer_size = 255;
+    char puffer[puffer_size];
+    char ini[] = "./EFTRadarSettings.ini";
+
+    //Read IP_RADAR_PC from EFTRadarSettings.ini
+    GetPrivateProfileString("RadarSettings", "IP_RADAR_PC", "error", puffer, puffer_size, ini);
+    DEVICE_IP_RADAR_PC = puffer;
+
+    if (DEVICE_IP_RADAR_PC == "fill.me.in.with.the.local.network.adapter.ip.of.radar.pc")
+    {
+        std::cout << "IP_RADAR_PC not set in EFTRadarSettings.ini\n";
+        std::cout << "Press ENTER to exit \n";
+        std::cin.ignore();
+        exit(1);
+    }
+
+    //Read IP_GAME_PC from EFTRadarSettings.ini
+    GetPrivateProfileString("RadarSettings", "IP_GAME_PC", "error", puffer, puffer_size, ini);
+    DEVICE_IP_GAME_PC = puffer;
+
+    if (DEVICE_IP_GAME_PC == "fill.me.in.with.the.vpn.adapter.ip.of.game.pc")
+    {
+        std::cout << "IP_GAME_PC not set in EFTRadarSettings.ini\n";
+        std::cout << "Press ENTER to exit \n";
+        std::cin.ignore();
+        exit(1);
+    }
+
+    //Read if Transparent from EFTRadarSettings.ini
+    GetPrivateProfileString("RadarSettings", "bg_transparent", "error", puffer, puffer_size, ini);
+    std::string tmp = puffer;
+
+    if (tmp == "true") {
+        background_Transparent = true;
+    }
+    else {
+        background_Transparent = false;
+    }
+
+    //Read if custom_colour from EFTRadarSettings.ini
+    GetPrivateProfileString("RadarSettings", "custom_bg_colour", "error", puffer, puffer_size, ini);
+    tmp = puffer;
+
+    if (tmp == "true") {
+        custom_bg_colour = true;
+        custom_r = GetPrivateProfileInt("RadarSettings", "custom_r", 0, ini);
+        custom_g = GetPrivateProfileInt("RadarSettings", "custom_g", 0, ini);
+        custom_b = GetPrivateProfileInt("RadarSettings", "custom_b", 0, ini);
+    }
+    else {
+        custom_bg_colour = false;
+    }
+
+    //view mode: 0= fixed cam, 1= free cam, 2= top down fixed cam 3= top down free cam
+    view_mode = GetPrivateProfileInt("RadarSettings", "view_mode", 0, ini);
+    //set freecam depending on view_mode
+    if (view_mode % 2 == 1) {
+        freecam = true;
+    }
+
+
+    //print some stuff on console
+    std::cout << "Set IPv4 address of Radar PC to: '" << DEVICE_IP_RADAR_PC.c_str() << "'\n";
+    std::cout << "Set IPv4 address of Game PC to: '" << DEVICE_IP_GAME_PC.c_str() << "'\n";
+    printviewmode(view_mode);
+    std::cout << "Set Background Transparent: " << std::boolalpha << background_Transparent << "\n";
+    std::cout << "Set Background Custom colour: " << std::boolalpha << custom_bg_colour << "\n";
+    if (custom_bg_colour) {
+        std::cout << "custom r: " << custom_r << std::endl;
+        std::cout << "custom g: " << custom_g << std::endl;
+        std::cout << "custom b: " << custom_b << std::endl;
+    }
+    std::cout << "\n";
+}
+
+//Solution found at (https://stackoverflow.com/a/51956224)
+bool MakeWindowTransparent(SDL_Window* window, COLORREF colorKey) {
+    // Get window handle (https://stackoverflow.com/a/24118145/3357935)
+    SDL_SysWMinfo wmInfo;
+    SDL_VERSION(&wmInfo.version);  // Initialize wmInfo
+    SDL_GetWindowWMInfo(window, &wmInfo);
+    HWND hWnd = wmInfo.info.win.window;
+
+    // Change window type to layered (https://stackoverflow.com/a/3970218/3357935)
+    SetWindowLong(hWnd, GWL_EXSTYLE, GetWindowLong(hWnd, GWL_EXSTYLE) | WS_EX_LAYERED);
+
+    // Set transparency color
+    return SetLayeredWindowAttributes(hWnd, colorKey, 0, LWA_COLORKEY);
+}
+
+void printviewmode(int vm) {
+    switch (vm) {
+    case 0:
+        std::cout << "view_mode number: 0 - 3D fixed cam\n";
+        break;
+    case 1:
+        std::cout << "view_mode number: 1 - 3D free cam\n";
+        break;
+    case 2:
+        std::cout << "view_mode number: 2 - 2D fixed cam\n";
+        break;
+    case 3:
+        std::cout << "view_mode number: 3 - 2D free cam\n";
+        break;
+
+    default:
+        std::cout << "view_mode incorrect number:" << view_mode << "\n";
+        break;
+    }
+}
+
+void switchTransparent() {
+    background_Transparent = !background_Transparent;
+}
+
+void switchFreecam() {
+    freecam = !freecam;
+    if (freecam) {
+        view_mode += 1;
+    }
+    else {
+        view_mode -= 1;
+    }
+    printviewmode(view_mode);
+}
+void switchViewMode() {
+    view_mode ++;
+    freecam = !freecam;
+    view_mode = view_mode % 4;
+    printviewmode(view_mode);
+}
+
+void resetCamPos() {
+        freecam_pos_x = topdown_freecam_pos_x = player_pos_x;
+        freecam_pos_y = player_pos_y + 1.5f;
+        freecam_pos_z = topdown_freecam_pos_z = player_pos_z;
+
+}
+
+
+
+
+/* Print all information about a key event */
+void KeyController(SDL_KeyboardEvent* key) {
+    /* Print the state + name of the key */
+    if (key->type == SDL_KEYDOWN) {
+        std::cout << "Pressed Key: " << SDL_GetKeyName(key->keysym.sym) << "\n";
+        //do stuff with keys
+        switch (key->keysym.sym) {
+            //change camera height
+        case SDLK_SPACE:
+            if (view_mode > 1) {
+                topdown_cam_height += speed;
+                if (topdown_cam_height > 500.0f) {
+                    topdown_cam_height = 500.0f;
+                }
+            }
+            else {
+                freecam_pos_y += speed;
+                std::cout << "3d freecam new height: " << freecam_pos_y << "\n";
+            }
+            
+            break;
+        case SDLK_LSHIFT:
+            if (view_mode > 1) {
+                topdown_cam_height -= speed;
+                if (topdown_cam_height < 10.0f) {
+                    topdown_cam_height = 10.0f;
+                }
+            }
+            else {
+                freecam_pos_y -= speed;
+                std::cout << "3d freecam new height: " << freecam_pos_y << "\n";
+            }
+            break;
+        case SDLK_w:
+            if (view_mode > 1) {
+                
+            }
+            else {
+                freecam_at += freeplayer_forward_vec;
+            }
+            break;
+        case SDLK_s:
+            if (view_mode > 1) {
+
+            }
+            else {
+                freecam_at -= freeplayer_forward_vec;
+            }
+            break;
+        case SDLK_d:
+            if (view_mode > 1) {
+
+            }
+            else {
+                freecam_at += getStrafeVectorRight(freeplayer_forward_vec);
+            }
+            break;
+        case SDLK_a:
+            if (view_mode > 1) {
+
+            }
+            else {
+                freecam_at -= getStrafeVectorRight(freeplayer_forward_vec);
+            }
+            break;
+
+        case SDLK_t:
+            switchTransparent();
+            std::cout << "background_Transparent: " << background_Transparent << "\n";
+            break;
+        case SDLK_f:
+            switchFreecam();
+            std::cout << "freecam: " << freecam << "\n";
+            break;
+        case SDLK_r:
+            resetCamPos();
+            std::cout << "reset camera position" << "\n";
+            break;
+        case SDLK_v:
+            switchViewMode();
+            break;
+        default:
+            break;
+        }
+    }
+
+}
+
+glm::vec3 getStrafeVectorRight(glm::vec3 vec) {
+    return glm::vec3(vec.x*0+vec.y*0+vec.z*1, vec.x * 0 + vec.y * 1 + vec.z * 0, vec.x * -1 + vec.y * 0 + vec.z * 0);
 }
