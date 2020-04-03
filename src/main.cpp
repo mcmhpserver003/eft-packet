@@ -601,7 +601,7 @@ void do_render(GraphicsState* gfx)
                 freecam_pos_z = player_pos_z;
                 break;
             case 3:
-                view = glm::mat4(-1.0f, 0.0f, -0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, -0.0f, 0.0f, freecam_pos_x, -freecam_pos_z, -topdown_cam_height, 1.0f);
+                view = glm::mat4(-1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, freecam_pos_x, -freecam_pos_z, -topdown_cam_height, 1.0f);
                 break;
 
             default:
